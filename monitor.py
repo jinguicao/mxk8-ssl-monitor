@@ -1,202 +1,127 @@
-
-def send_alert(alerts, checked_at):
-    import html
-    from email.message import EmailMessage
-
-    host = os.environ["SMTP_HOST"]
-    port = int(os.getenv("SMTP_PORT", "465"))
-    username = os.environ["SMTP_USER"]
-    password = os.environ["SMTP_PASSWORD"]
-    sender = os.getenv("SMTP_FROM") or username
-
-    # 只展示异常域名，正常域名不进入邮件
-    expiring = [
-        x for x in alerts
-        if x["days"] is not None and 0 <= x["days"] <= 7
-    ]
-
-    expired = [
-        x for x in alerts
-        if x["days"] is not None and x["days"] < 0
-    ]
-
-    failed = [
-        x for x in alerts
-        if x["expires"] is None
-        or any("验证失败" in e or "获取失败" in e
-               for e in x["errors"])
-    ]
-
-    def make_rows(items, status, color):
-        rows = ""
-        for x in items:
-            expiry = (
-                x["expires"].strftime("%Y-%m-%d %H:%M UTC")
-                if x["expires"] else "无法获取"
-            )
-            days = (
-                f'{x["days"]}天'
-                if x["days"] is not None else "未知"
-            )
-            reason = "；".join(x["errors"])
-
-            rows += f"""
-            <tr>
-              <td style="padding:13px;border-bottom:1px solid #eee;">
-                <b>{html.escape(x["domain"])}</b>
-              </td>
-              <td style="padding:13px;border-bottom:1px solid #eee;">
-                {expiry}
-              </td>
-              <td style="padding:13px;border-bottom:1px solid #eee;">
-                {days}
-              </td>
-              <td style="padding:13px;border-bottom:1px solid #eee;
-                         color:{color};font-weight:bold;">
-                {status}
-                <div style="font-size:11px;font-weight:normal;color:#777;">
-                  {html.escape(reason)}
-                </div>
-              </td>
-            </tr>
-            """
-        return rows
-
-    def make_section(title, items, status, color, description):
-        if not items:
-            return ""
-
-        return f"""
-        <h3 style="margin:26px 0 8px;color:#25364a;">
-          {title}（{len(items)}）
-        </h3>
-        <p style="font-size:13px;color:#777;">{description}</p>
-        <table width="100%" cellpadding="0" cellspacing="0"
-               style="border:1px solid #eee;border-collapse:collapse;
-                      font-size:13px;">
-          <tr style="background:#f5f7fa;color:#667085;text-align:left;">
-            <th style="padding:12px;">域名</th>
-            <th style="padding:12px;">到期时间</th>
-            <th style="padding:12px;">剩余天数</th>
-            <th style="padding:12px;">状态</th>
-          </tr>
-          {make_rows(items, status, color)}
-        </table>
-        """
-
-    local_time = checked_at.astimezone().strftime(
-        "%Y-%m-%d %H:%M:%S %Z"
-    )
-
-    html_body = f"""
-    <html>
-    <body style="margin:0;padding:20px;background:#f3f5f8;
-                 font-family:Arial,'Microsoft YaHei',sans-serif;">
-
-      <div style="max-width:760px;margin:auto;background:#fff;
-                  border-radius:10px;overflow:hidden;">
-
-        <div style="background:#17365b;padding:25px 28px;color:white;">
-          <div style="font-size:12px;color:#cbd8e8;">
-            MXK8 INFRASTRUCTURE MONITORING
-          </div>
-          <h2 style="margin:10px 0 5px;">
-            SSL 证书监控提醒
-          </h2>
-          <div style="font-size:12px;color:#d5e0ed;">
-            DAILY CERTIFICATE REPORT
-          </div>
-        </div>
-
-        <div style="padding:25px 28px;">
-
-          <p style="color:#475467;font-size:14px;">
-            本次检查发现以下证书异常，请及时处理。
-          </p>
-
-          <div style="background:#f5f7fa;padding:15px;
-                      border-radius:7px;font-size:13px;
-                      line-height:2;color:#475467;">
-            检查时间：{local_time}<br>
-            监控域名：19个<br>
-            即将到期：{len(expiring)}个<br>
-            已经过期：{len(expired)}个<br>
-            检测异常：{len(failed)}个
-          </div>
-
-          {make_section(
-              "01 · 即将到期证书", expiring,
-              "即将到期", "#b54708",
-              "以下证书将在7天内到期，请尽快续期。"
-          )}
-
-          {make_section(
-              "02 · 已过期证书", expired,
-              "已过期", "#b42318",
-              "以下证书已经超过有效期，请优先处理。"
-          )}
-
-          {make_section(
-              "03 · 检测异常", failed,
-              "检测异常", "#b42318",
-              "以下域名无法完成可靠检测或证书验证失败。"
-          )}
-
-          <div style="margin-top:28px;padding-top:16px;
-                      border-top:1px solid #eee;
-                      color:#98a2b3;font-size:11px;line-height:1.8;">
-            本邮件由 MXK8 SSL 自动监控系统发送。<br>
-            证书到期时间以本次实时检测结果为准。
-          </div>
-
-        </div>
+        UTC时间：{checked_at.strftime("%Y-%m-%d %H:%M:%S UTC")}<br>
+        监控域名：{len(DOMAINS)} 个<br>
+        即将到期：{len(expiring)} 个　
+        已过期：{len(expired)} 个　
+        检测异常：{len(failed)} 个
       </div>
-    </body>
-    </html>
-    """
+      {render_section("01 · 即将到期证书", expiring, "即将到期",
+                      "#b54708", "以下证书将在未来7天内到期，请尽快安排续期。")}
+      {render_section("02 · 已过期证书", expired, "已过期",
+                      "#b42318", "以下证书已超过有效期，请优先处理。")}
+      {render_section("03 · 检测或验证异常", failed, "检测异常",
+                      "#b42318", "以下域名无法获取证书，或证书链/主机名验证失败。")}
+      <footer style="margin-top:26px;padding-top:15px;border-top:1px solid #e8edf3;
+                     color:#667085;font-size:11px;line-height:1.8;">
+        本邮件由 MXK8 SSL 自动监控程序发送。<br>
+        证书到期时间以本次连接获取到的服务器证书为准。
+      </footer>
+    </main>
+  </div>
+</body>
+</html>"""
 
-    # 同时提供纯文本版本，兼容不支持HTML的邮箱客户端
-    plain = [
+    plain_lines = [
         "MXK8 SSL证书监控提醒",
-        f"检查时间：{local_time}",
-        f"即将到期：{len(expiring)}个",
-        f"已过期：{len(expired)}个",
-        f"检测异常：{len(failed)}个",
-        ""
+        f"检查时间：{timestamp}",
+        f"即将到期：{len(expiring)}个；已过期：{len(expired)}个；检测异常：{len(failed)}个",
+        "",
     ]
+    if test_mode:
+        plain_lines.insert(0, "【测试邮件】以下数据为模拟数据，不代表真实检测结果。")
 
-    for title, items in [
+    for section_title, items in [
         ("即将到期证书", expiring),
         ("已过期证书", expired),
-        ("检测异常", failed)
+        ("检测或验证异常", failed),
     ]:
-        for x in items:
-            plain.append(
-                f'{title}：{x["domain"]}，'
-                f'到期时间：{x["expires"]}，'
-                f'剩余天数：{x["days"]}，'
-                f'原因：{"；".join(x["errors"])}'
-            )
+        if items:
+            plain_lines.append(section_title)
+            for item in items:
+                expiry_text = (
+                    item["expiry"].strftime("%Y-%m-%d %H:%M UTC")
+                    if item["expiry"] else "无法获取"
+                )
+                days_text = (
+                    str(item["days"]) if item["days"] is not None else "未知"
+                )
+                plain_lines.append(
+                    f'- {item["host"]} | 到期：{expiry_text} | 剩余：{days_text}天'
+                )
+                for error in item["errors"]:
+                    plain_lines.append(f"  原因：{error}")
+            plain_lines.append("")
+
+    return title, "\n".join(plain_lines), html_body
+
+
+def send_email(alerts, checked_at, test_mode=False):
+    smtp_host = os.environ["SMTP_HOST"]
+    smtp_port = int(os.getenv("SMTP_PORT", "465"))
+    smtp_user = os.environ["SMTP_USER"]
+    smtp_password = os.environ["SMTP_PASSWORD"]
+    smtp_from = os.getenv("SMTP_FROM") or smtp_user
+
+    subject, plain_text, html_body = build_email(
+        alerts, checked_at, test_mode=test_mode
+    )
 
     message = EmailMessage()
-    message["Subject"] = (
-        f"[MXK8 SSL告警] 即将到期{len(expiring)}个"
-        f"/已过期{len(expired)}个/异常{len(failed)}个"
-    )
-    message["From"] = sender
-    message["To"] = os.getenv(
-        "ALERT_EMAIL_TO", "tim@mxk8.com"
-    )
-
-    message.set_content("\n".join(plain))
+    message["Subject"] = subject
+    message["From"] = smtp_from
+    message["To"] = RECIPIENT
+    message["Date"] = formatdate(localtime=True)
+    message.set_content(plain_text)
     message.add_alternative(html_body, subtype="html")
 
-    if port == 465:
-        with smtplib.SMTP_SSL(host, port, timeout=20) as server:
-            server.login(username, password)
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20) as server:
+            server.login(smtp_user, smtp_password)
             server.send_message(message)
     else:
-        with smtplib.SMTP(host, port, timeout=20) as server:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
+            server.ehlo()
             server.starttls(context=ssl.create_default_context())
-            server.login(username, password)
+            server.ehlo()
+            server.login(smtp_user, smtp_password)
             server.send_message(message)
+
+
+def make_test_alert(checked_at):
+    """构造明确标注为模拟数据的邮件样式测试记录。"""
+    sample_expiry = checked_at + timedelta(days=3)
+    return [{
+        "host": "img.mxk8.com（示例）",
+        "expiry": sample_expiry,
+        "days": 3,
+        "issuer": "示例证书颁发机构",
+        "subject": "示例证书",
+        "errors": ["样式测试：模拟证书将在3天后到期"],
+        "expiring_soon": True,
+        "expired": False,
+        "verification_failed": False,
+    }]
+
+
+def main():
+    checked_at = datetime.now(timezone.utc)
+    results = [check_domain(host, checked_at) for host in DOMAINS]
+    alerts = [item for item in results if item["errors"]]
+
+    print(f"检查时间（UTC）：{checked_at.isoformat()}")
+    print(f"域名数量：{len(DOMAINS)}；异常数量：{len(alerts)}")
+
+    for item in results:
+        print(
+            f"{item['host']} | expiry={item['expiry']} | "
+            f"days={item['days']} | errors={item['errors']}"
+        )
+
+    if alerts:
+        send_email(alerts, checked_at)
+        print(f"告警邮件已提交发送，收件人：{RECIPIENT}")
+    elif os.getenv("SEND_TEST_EMAIL", "false").lower() == "true":
+        send_email(make_test_alert(checked_at), checked_at, test_mode=True)
+        print(f"样式测试邮件已提交发送，收件人：{RECIPIENT}")
+    else:
+        print("所有证书正常且剩余超过7天，不发送邮件。")
+
